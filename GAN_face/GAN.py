@@ -11,12 +11,18 @@ import time
 import os
 from tensorflow.examples.tutorials.mnist import input_data
 
-from keras.models import Sequential
-from keras.layers import Dense, Activation, Flatten, Reshape
+from keras.models import Sequential, Model
+from keras.layers import Dense, Activation, Flatten, Reshape, InputLayer, Input
 from keras.layers import Conv2D, Conv2DTranspose, UpSampling2D
 from keras.layers import LeakyReLU, Dropout
 from keras.layers import BatchNormalization
 from keras.optimizers import Adam, RMSprop
+from keras.backend import clear_session
+
+import keras.layers as layers
+from keras.applications.mobilenet_v2 import MobileNetV2
+from keras.applications.mobilenet import MobileNet
+
 
 import matplotlib.pyplot as plt
 
@@ -25,11 +31,23 @@ from imageio import imread
 
 from gan_settings import _IMG_ROWS, _IMG_COLS, _CHANNEL, \
     _TRAIN_IMG_PATH,\
-    _TRAIN_STEPS,  _BATCH_SIZE, _SAVE_INTERVAL, _OUTPUT_IMAGES_X, _OUTPUT_IMAGES_Y, _GENERATED_FACES_PATH
+    _TRAIN_STEPS,  _BATCH_SIZE, _SAVE_INTERVAL, \
+    _OUTPUT_IMAGES_X, _OUTPUT_IMAGES_Y, \
+    _MOBILENET_INPUT_SHAPE, \
+    _GENERATED_FACES_PATH, _INPUT_TENSOR_SHAPE
 
 
-from keras.backend import clear_session
+
+
+
+
+
+
+
 clear_session()
+
+
+
 
 
 """
@@ -53,10 +71,31 @@ def _open_and_reshape_image(dir=_TRAIN_IMG_PATH,
     return x_train
 
 
+def load_mobilenet_cnn(size_output=None, default_input_shape=_MOBILENET_INPUT_SHAPE, input_tensor_shape=None,
+                       batch_size=_BATCH_SIZE):
+    base_model = MobileNet(include_top=False, input_shape=default_input_shape,
+                           alpha=1, depth_multiplier=1,
+                           dropout=0.001, weights="imagenet",
+                           input_tensor=input_tensor_shape, pooling=None)
+    # if any(input_tensor_shape):
+    #     base_model.input_tensor = InputLayer(input_shape=input_tensor_shape, batch_size=batch_size)
+
+    # add fully connected layers
+    fc0 = base_model.output
+    fc0_pool = layers.GlobalAveragePooling2D(data_format='channels_last', name='fc0_pool')(fc0)
+    fc1 = layers.Dense(256, activation='relu', name='fc1_dense')(fc0_pool)
+    fc2 = layers.Dense(_IMG_ROWS * _IMG_COLS * _CHANNEL, activation='tanh', name='fc2_dense')(fc1)
+
+    model = Model(inputs=base_model.input, outputs=fc2)
+
+    # freeze the early layers
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    model.compile(optimizer='sgd', loss='mean_squared_error')
 
 
-
-
+    return model
 
 
 
@@ -133,42 +172,46 @@ class DCGAN(object):
     def generator(self):
         if self.G:
             return self.G
-        self.G = Sequential()
-        dropout = 0.4
-        depth = 64+64+64+64
-        dim = 75
-        # In: 100
-        # Out: dim x dim x depth
-        self.G.add(Dense(dim*dim*depth, input_dim=100))
-        self.G.add(BatchNormalization(momentum=0.9))
-        self.G.add(Activation('relu'))
-        self.G.add(Reshape((dim, dim, depth)))
-        self.G.add(Dropout(dropout))
+        # self.G = Sequential()
+        # dropout = 0.4
+        # depth = 64+64+64+64
+        # dim = 75
+        # # In: 100
+        # # Out: dim x dim x depth
+        # self.G.add(Dense(dim*dim*depth, input_dim=100))
+        # self.G.add(BatchNormalization(momentum=0.9))
+        # self.G.add(Activation('relu'))
+        # self.G.add(Reshape((dim, dim, depth)))
+        # self.G.add(Dropout(dropout))
+        #
+        # # In: dim x dim x depth
+        # # Out: 2*dim x 2*dim x depth/2
+        # self.G.add(UpSampling2D())
+        # self.G.add(Conv2DTranspose(int(depth/2), 5, padding='same'))
+        # self.G.add(BatchNormalization(momentum=0.9))
+        # self.G.add(Activation('relu'))
+        #
+        # self.G.add(UpSampling2D())
+        # self.G.add(Conv2DTranspose(int(depth/4), 5, padding='same'))
+        # self.G.add(BatchNormalization(momentum=0.9))
+        # self.G.add(Activation('relu'))
+        #
+        # self.G.add(Conv2DTranspose(int(depth/8), 5, padding='same'))
+        # self.G.add(BatchNormalization(momentum=0.9))
+        # self.G.add(Activation('relu'))
+        #
+        # self.G.add(UpSampling2D())
+        # self.G.add(Conv2DTranspose(int(depth/16), 5, padding='same'))
+        # self.G.add(BatchNormalization(momentum=0.9))
+        # self.G.add(Activation('relu'))
+        #
+        # # Out: 28 x 28 x 1 grayscale image [0.0,1.0] per pix
+        # self.G.add(Conv2DTranspose(3, 5, padding='same'))
+        # self.G.add(Activation('sigmoid'))
 
-        # In: dim x dim x depth
-        # Out: 2*dim x 2*dim x depth/2
-        self.G.add(UpSampling2D())
-        self.G.add(Conv2DTranspose(int(depth/2), 5, padding='same'))
-        self.G.add(BatchNormalization(momentum=0.9))
-        self.G.add(Activation('relu'))
+        self.G = load_mobilenet_cnn()
+        self.G.compile(optimizer='adam', loss='mean_squared_error')
 
-        self.G.add(UpSampling2D())
-        self.G.add(Conv2DTranspose(int(depth/4), 5, padding='same'))
-        self.G.add(BatchNormalization(momentum=0.9))
-        self.G.add(Activation('relu'))
-
-        self.G.add(Conv2DTranspose(int(depth/8), 5, padding='same'))
-        self.G.add(BatchNormalization(momentum=0.9))
-        self.G.add(Activation('relu'))
-
-        self.G.add(UpSampling2D())
-        self.G.add(Conv2DTranspose(int(depth/16), 5, padding='same'))
-        self.G.add(BatchNormalization(momentum=0.9))
-        self.G.add(Activation('relu'))
-
-        # Out: 28 x 28 x 1 grayscale image [0.0,1.0] per pix
-        self.G.add(Conv2DTranspose(3, 5, padding='same'))
-        self.G.add(Activation('sigmoid'))
         self.G.summary()
         return self.G
 
@@ -222,7 +265,6 @@ class MNIST_DCGAN(object):
         self.generator = self.DCGAN.generator()
 
 
-
     def train(self, train_steps=_TRAIN_STEPS, batch_size=_BATCH_SIZE, save_interval=_SAVE_INTERVAL):
         print(batch_size)
         noise_input = None
@@ -232,8 +274,13 @@ class MNIST_DCGAN(object):
             images_train = self.x_train[np.random.randint(0,
                 self.x_train.shape[0], size=batch_size), :, :, :]
             print(images_train.shape)
-            noise = np.random.uniform(-1.0, 1.0, size=[batch_size, 100])
-            images_fake = self.generator.predict(noise)
+
+
+            noise = np.random.uniform(-1.0, 1.0, size=_INPUT_TENSOR_SHAPE)
+
+
+
+            images_fake = self.generator.predict(noise).reshape(_IMG_ROWS, _IMG_COLS, _CHANNEL)
             print(images_fake.shape)
             x = np.concatenate((images_train, images_fake))
             y = np.ones([2*batch_size, 1])
@@ -241,7 +288,9 @@ class MNIST_DCGAN(object):
             d_loss = self.discriminator.train_on_batch(x, y)
 
             y = np.ones([batch_size, 1])
+
             noise = np.random.uniform(-1.0, 1.0, size=[batch_size, 100])
+
             a_loss = self.adversarial.train_on_batch(noise, y)
             log_mesg = "%d: [D loss: %f, acc: %f]" % (i, d_loss[0], d_loss[1])
             log_mesg = "%s  [A loss: %f, acc: %f]" % (log_mesg, a_loss[0], a_loss[1])
@@ -260,7 +309,7 @@ class MNIST_DCGAN(object):
                 noise = np.random.uniform(-1.0, 1.0, size=[samples, 100])
             else:
                 filename = _GENERATED_FACES_PATH
-                filename += "face_%d.png" % step
+                filename += "face_{}.png".format(str(100001 + step))
             images = self.generator.predict(noise)
         else:
             i = np.random.randint(0, self.x_train.shape[0], samples)
