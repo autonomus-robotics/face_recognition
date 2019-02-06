@@ -3,19 +3,17 @@
 imports
 ########################################################################################################################
 """
-import os
-# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-os.environ["PATH"] += os.pathsep + 'D:/Graphviz2.38/bin/'
-
-# from tensorflow import RunOptions
-# run_options = RunOptions(report_tensor_allocations_upon_oom = True)
-# sess.run(op, feed_dict=fdict, options=run_options)
+from gan_settings import _IMG_ROWS, _IMG_COLS, _CHANNEL, \
+    _TRAIN_IMG_PATH, _TRUE_PHOTOS_DIR, _IMAGES_SAVE_PATH, \
+    _GRAPHVIZ_PATH,_ROTATION, _LIGHTNING, \
+    _TRAIN_STEPS,  _BATCH_SIZE, _SAVE_INTERVAL, _SUMMARY_PATH, \
+    _OUTPUT_IMAGES_X, _OUTPUT_IMAGES_Y, \
+    _MOBILENET_INPUT_SHAPE, \
+    _INPUT_TENSOR_SHAPE, _PERSONS
 
 
 import numpy as np
 import time
-# from tensorflow.examples.tutorials.mnist import input_data
 
 from keras.models import Sequential, Model
 from keras.layers import Dense, Activation, Flatten, Reshape, InputLayer, Input, Add
@@ -35,20 +33,17 @@ import keras.layers as layers
 # from keras.applications.mobilenet_v2 import MobileNetV2
 from keras.applications.mobilenet import MobileNet
 
-
+from contextlib import redirect_stdout
 import matplotlib.pyplot as plt
 
 # from cv2 import imread, imwrite
 from imageio import imread, imwrite
 
+import os
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["PATH"] += os.pathsep + _GRAPHVIZ_PATH
 
-from gan_settings import _IMG_ROWS, _IMG_COLS, _CHANNEL, \
-    _TRAIN_IMG_PATH, _TRUE_PHOTOS_DIR, _BLENDER_PHOTOS_DIR, \
-    _ROTATION, _LIGHTNING, \
-    _TRAIN_STEPS,  _BATCH_SIZE, _SAVE_INTERVAL, \
-    _OUTPUT_IMAGES_X, _OUTPUT_IMAGES_Y, \
-    _MOBILENET_INPUT_SHAPE, \
-    _GENERATED_FACES_PATH, _INPUT_TENSOR_SHAPE, _PERSONS
 
 
 
@@ -66,10 +61,8 @@ Local variables
 ########################################################################################################################
 """
 
-__COLS = 600
-__ROWS = 600
-# _TRAIN_STEPS = 1000
-_NAME = 'mobilenet'
+
+
 
 
 
@@ -152,11 +145,15 @@ TRAIN FUNCTION
 ########################################################################################################################
 """
 
-def train(gen, train_steps=_TRAIN_STEPS, batch_size=_BATCH_SIZE, save_interval=_SAVE_INTERVAL,
+def train(gen,
+          train_steps=_TRAIN_STEPS,
+          save_interval=_SAVE_INTERVAL,
+          train_images=_TRAIN_IMG_PATH,
           true_photos=_TRUE_PHOTOS_DIR):
-    true_photos_with_labels = _get_labeled_true_photos(_TRUE_PHOTOS_DIR)
 
-    blender_photos = (imread(blender_photo) for blender_photo in _get_true_photos_paths(_TRAIN_IMG_PATH))
+    true_photos_with_labels = _get_labeled_true_photos(true_photos)
+
+    blender_photos = (imread(blender_photo) for blender_photo in _get_true_photos_paths(train_images))
 
     #     bot.send("Generator started training")
     for i, true_photo_with_labels, blender_photo in zip(range(_ROTATION * _LIGHTNING * _PERSONS),
@@ -170,12 +167,14 @@ def train(gen, train_steps=_TRAIN_STEPS, batch_size=_BATCH_SIZE, save_interval=_
         images_fake = images_fake.reshape(600, 600, 3)
         #         os.mkdir
 
-        print(images_fake.shape)
+        if int(i%save_interval)==0:
+            imwrite(_IMAGES_SAVE_PATH + 'face_{}.jpg'.format(i), images_fake)
 
-        imwrite('faces_mobilenet_generator\\face_{}.jpg'.format(i), images_fake)
-        print(i, "/", _TRAIN_STEPS, "epoches")
+
+        print(i, "/", train_steps, "epoches")
+
         gen.train_on_batch([img, rot_lbl, light_lbl], blender_photo)
-        if i == _TRAIN_STEPS: break
+        if i == train_steps: break
 #     bot.send("Generator finished training")
 
 
@@ -192,7 +191,7 @@ TRAIN FUNCTION
 
 
 def generator(_compile=False,
-              input_output_return=False,
+              do_plot=True,
               ):
     """
     """
@@ -213,7 +212,7 @@ def generator(_compile=False,
     input_label_lightning_dense = Dense(64, activation='relu', name='input_label_lightning_dense')(
         input_label_lightning)
 
-    generator_inputs = [input_image, input_label_rotation, input_label_lightning]
+    # generator_inputs = [input_image, input_label_rotation, input_label_lightning]
     generator_input_denses = [input_image_dense, input_label_rotation_dense, input_label_lightning_dense]
 
     merged_inputs = Add(name='add_generator_input_denses')(generator_input_denses)
@@ -224,7 +223,6 @@ def generator(_compile=False,
 
     """
     """
-
 
     mobile_net_cnn = MobileNet(include_top=False,
                                alpha=1, depth_multiplier=1,
@@ -241,37 +239,9 @@ def generator(_compile=False,
 
     fc0_pool = layers.GlobalAveragePooling2D(data_format='channels_last', name='fc0_pool')(mx)
     fc1 = layers.Dense(256, activation='relu', name='fc1_dense')(fc0_pool)
-    print(fc1.shape)
+    # print(fc1.shape)
     fc2 = layers.Dense(_IMG_ROWS * _IMG_COLS * _CHANNEL, activation='tanh', name='fc2_dense')(fc1)
 
-    """
-    x1_ = Dense(int(depth / 8), activation='relu', name='newnew')(x1_out)
-
-    x2 = UpSampling2D()(x1_)
-    x2_conv2d = Conv2DTranspose(int(depth / 200), 5, padding='same')(x2)
-    x2_batch_norm = BatchNormalization(momentum=0.99)(x2_conv2d)
-    x2_drop = Dropout(dropout)(x2_batch_norm)
-    x2_out = Activation(activation='relu')(x2_drop)
-
-    x3 = UpSampling2D()(x2_out)
-    x3_conv2d = Conv2DTranspose(int(depth / 400), 5, padding='same')(x3)
-    x3_batch_norm = BatchNormalization(momentum=0.99)(x3_conv2d)
-    x3_drop = Dropout(dropout / 2)(x3_batch_norm)
-    x3_out = Activation(activation='relu')(x3_drop)
-
-    x4_conv2d = Conv2DTranspose(int(depth / 800), 5, padding='same')(x3_out)
-    x4_batch_norm = BatchNormalization(momentum=0.99)(x4_conv2d)
-    x4_drop = Dropout(dropout / 2)(x3_out)
-    x4_out = Activation(activation='relu')(x4_batch_norm)
-
-    x5_conv2d = Conv2DTranspose(1, 5, padding='same')(x4_out)
-    x5_out = Activation(activation='relu')(x5_conv2d)
-
-    x6 = Dense(int(depth / 128), activation='relu')(x5_out)
-    xOut = Dense((3), activation='relu')(x6)
-    """
-
-    # model = Model(inputs=[input_image, input_label_rotation, input_label_lightning], outputs=xOut)
     model = Model(inputs=[input_image, input_label_rotation, input_label_lightning], outputs=fc2)
     opt = RMSprop(lr=0.001, decay=0.1, epsilon=0.1)
 
@@ -282,18 +252,15 @@ def generator(_compile=False,
                       metrics=['accuracy'])
 
     model.summary()
-    from contextlib import redirect_stdout
 
-    with open(_NAME + '.txt', 'w') as f:
+    with open(_SUMMARY_PATH + '.txt', 'w') as f:
         with redirect_stdout(f):
             model.summary()
 
-    plot_model(model, to_file='mobilenet_custom_input.png', show_shapes=True)
+    if do_plot:
+        plot_model(model, to_file='mobilenet_custom_input.png', show_shapes=True)
 
-    if input_output_return:
-        return generator_inputs, x6
-    else:
-        return model
+    return model
 
 
 
@@ -309,7 +276,7 @@ Let's do it
 """
 if __name__=='__main__':
 
-    gen = generator(True)
+    gen = generator(True,False)
 
     train(gen)
 
@@ -317,12 +284,3 @@ if __name__=='__main__':
 # # import tensorflow as tf
 # # print(tf.__version__)
 # train(gen)
-
-
-
-
-
-
-
-
-
